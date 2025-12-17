@@ -52,7 +52,9 @@ async def merge(
         output_path
     ], check=True)
 
+    public_url = upload_to_cos(output_path)
+
     return {
         "job_id": job_id,
-        "output_file": output_path
+        "video_url": public_url
     }

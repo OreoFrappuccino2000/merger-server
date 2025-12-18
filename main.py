@@ -53,21 +53,23 @@ def merge(
     # 2. merge with ffmpeg (replace audio track)
     try:
         subprocess.run(
-            [
-                "ffmpeg", "-y",
-                "-i", video_path,
-                "-i", audio_path,
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-c:v", "copy",
-                "-c:a", "aac",
-                "-shortest",
-                output_path
-            ],
-            check=True,
-            stdout=subprocess.DEVNULL,
-            stderr=subprocess.PIPE
-        )
+        [
+            "ffmpeg", "-y",
+            "-i", video_path,
+            "-i", audio_path,
+            "-map", "0:v:0",
+            "-map", "1:a:0",
+            "-c:v", "copy",
+            "-c:a", "aac",
+            "-af", "aresample=async=1:first_pts=0",
+            "-movflags", "+faststart",
+            "-shortest",
+            output_path
+        ],
+        check=True,
+        stdout=subprocess.DEVNULL,
+        stderr=subprocess.PIPE
+    )
     except subprocess.CalledProcessError as e:
         raise HTTPException(
             status_code=500,

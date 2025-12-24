@@ -11,12 +11,9 @@ TMP_DIR = "/tmp"
 BASE_URL = "https://merger-server-production.up.railway.app"
 
 
-# ---------- helpers ----------
+# ---------------- helpers ----------------
 
 def download_file(url: str, out_path: str):
-    """
-    Downloads a URL to a local path. Fails fast if the URL returns HTML.
-    """
     try:
         r = requests.get(url, stream=True, allow_redirects=True, timeout=60)
         r.raise_for_status()
@@ -34,19 +31,29 @@ def download_file(url: str, out_path: str):
 
 
 def ensure_ready(path: str, min_bytes: int = 10_000):
-    """
-    Ensure the file exists and is non-trivially sized (prevents returning URL too early).
-    """
     if not os.path.exists(path):
         raise HTTPException(status_code=500, detail="Output video not created")
     if os.path.getsize(path) < min_bytes:
         raise HTTPException(status_code=500, detail="Output video too small / not ready")
 
 
+def probe_duration(path: str) -> float:
+    try:
+        out = subprocess.check_output(
+            [
+                "ffprobe",
+                "-v", "error",
+                "-show_entries", "format=duration",
+                "-of", "default=nk=1:nw=1",
+                path
+            ]
+        ).decode().strip()
+        return float(out)
+    except Exception:
+        raise HTTPException(status_code=500, detail="Failed to probe duration")
+
+
 def file_iterator(path: str, start: int = 0, end: int = None, chunk_size: int = 1024 * 1024):
-    """
-    Generator yielding file bytes from [start, end] inclusive.
-    """
     with open(path, "rb") as f:
         f.seek(start)
         remaining = (end - start + 1) if end is not None else None
@@ -66,7 +73,7 @@ def file_iterator(path: str, start: int = 0, end: int = None, chunk_size: int = 
             yield data
 
 
-# ---------- POST: merge ----------
+# ---------------- POST: merge ----------------
 
 @app.post("/merge")
 def merge(
@@ -79,26 +86,32 @@ def merge(
     audio_path = f"{TMP_DIR}/{job_id}_audio.wav"
     output_path = f"{TMP_DIR}/{job_id}_final.mp4"
 
-    # 1) download assets
+    # 1️⃣ download assets
     download_file(video_url, video_path)
     download_file(audio_url, audio_path)
 
-    # 2) merge with ffmpeg (replace audio track)
-    #    - aresample async + first_pts fixes "first second got cut"
-    #    - faststart helps MP4 streaming / playback
+    # 2️⃣ probe video duration (authoritative timeline)
+    video_duration = probe_duration(video_path)
+
+    # 3️⃣ merge (KEEP FULL VIDEO, PAD/TRIM AUDIO)
     try:
         subprocess.run(
             [
                 "ffmpeg", "-y",
                 "-i", video_path,
                 "-i", audio_path,
-                "-map", "0:v:0",
-                "-map", "1:a:0",
-                "-c:v", "copy",
+                "-filter_complex",
+                (
+                    "[0:v]setpts=PTS-STARTPTS[v];"
+                    f"[1:a]asetpts=PTS-STARTPTS,apad,atrim=0:{video_duration}[a]"
+                ),
+                "-map", "[v]",
+                "-map", "[a]",
+                "-c:v", "libx264",
+                "-preset", "veryfast",
+                "-crf", "20",
                 "-c:a", "aac",
-                "-af", "aresample=async=1:first_pts=0",
                 "-movflags", "+faststart",
-                "-shortest",
                 output_path
             ],
             check=True,
@@ -110,14 +123,13 @@ def merge(
 
     ensure_ready(output_path)
 
-    # 3) return direct download URL
     return {
         "job_id": job_id,
         "video_url": f"{BASE_URL}/download/{job_id}"
     }
 
 
-# ---------- HEAD: check download exists (optional but useful) ----------
+# ---------------- HEAD: check exists ----------------
 
 @app.head("/download/{job_id}")
 def head_download(job_id: str, response: Response):
@@ -133,7 +145,7 @@ def head_download(job_id: str, response: Response):
     return
 
 
-# ---------- GET: streaming mp4 download with Range support ----------
+# ---------------- GET: streaming download ----------------
 
 @app.get("/download/{job_id}")
 def download_video(job_id: str, request: Request):
@@ -151,18 +163,13 @@ def download_video(job_id: str, request: Request):
         "Cache-Control": "no-store",
     }
 
-    # Range request (resumable / chunked downloads)
     if range_header:
-        # Expected: "bytes=start-end"
         try:
             bytes_range = range_header.replace("bytes=", "").split("-")
             start = int(bytes_range[0]) if bytes_range[0] else 0
             end = int(bytes_range[1]) if len(bytes_range) > 1 and bytes_range[1] else file_size - 1
         except Exception:
             raise HTTPException(status_code=416, detail="Invalid Range header")
-
-        if start >= file_size:
-            raise HTTPException(status_code=416, detail="Range start out of bounds")
 
         end = min(end, file_size - 1)
         headers["Content-Range"] = f"bytes {start}-{end}/{file_size}"
@@ -175,7 +182,6 @@ def download_video(job_id: str, request: Request):
             headers=headers
         )
 
-    # Full download
     headers["Content-Length"] = str(file_size)
     return StreamingResponse(
         file_iterator(video_path, start=0, end=file_size - 1),

@@ -30,13 +30,6 @@ def download_file(url: str, out_path: str):
                 f.write(chunk)
 
 
-def ensure_ready(path: str, min_bytes: int = 10_000):
-    if not os.path.exists(path):
-        raise HTTPException(status_code=500, detail="Output video not created")
-    if os.path.getsize(path) < min_bytes:
-        raise HTTPException(status_code=500, detail="Output video too small / not ready")
-
-
 def probe_duration(path: str) -> float:
     try:
         out = subprocess.check_output(
@@ -50,7 +43,14 @@ def probe_duration(path: str) -> float:
         ).decode().strip()
         return float(out)
     except Exception:
-        raise HTTPException(status_code=500, detail="Failed to probe duration")
+        raise HTTPException(status_code=500, detail="Failed to probe video duration")
+
+
+def ensure_ready(path: str, min_bytes: int = 10_000):
+    if not os.path.exists(path):
+        raise HTTPException(status_code=500, detail="Output video not created")
+    if os.path.getsize(path) < min_bytes:
+        raise HTTPException(status_code=500, detail="Output video too small / not ready")
 
 
 def file_iterator(path: str, start: int = 0, end: int = None, chunk_size: int = 1024 * 1024):
@@ -86,14 +86,14 @@ def merge(
     audio_path = f"{TMP_DIR}/{job_id}_audio.wav"
     output_path = f"{TMP_DIR}/{job_id}_final.mp4"
 
-    # 1️⃣ download assets
+    # 1️⃣ Download assets
     download_file(video_url, video_path)
     download_file(audio_url, audio_path)
 
-    # 2️⃣ probe video duration (authoritative timeline)
+    # 2️⃣ Probe video duration (authoritative timeline)
     video_duration = probe_duration(video_path)
 
-    # 3️⃣ merge (KEEP FULL VIDEO, PAD/TRIM AUDIO)
+    # 3️⃣ Merge (KEEP FULL VIDEO, PAD/TRIM AUDIO, NO RE-ENCODE)
     try:
         subprocess.run(
             [
@@ -102,14 +102,16 @@ def merge(
                 "-i", audio_path,
                 "-filter_complex",
                 (
-                    "[0:v]setpts=PTS-STARTPTS[v];"
-                    f"[1:a]asetpts=PTS-STARTPTS,apad,atrim=0:{video_duration}[a]"
+                    f"[1:a]"
+                    f"aresample=async=1,"
+                    f"asetpts=PTS-STARTPTS,"
+                    f"apad,"
+                    f"atrim=0:{video_duration}"
+                    f"[a]"
                 ),
-                "-map", "[v]",
+                "-map", "0:v:0",
                 "-map", "[a]",
-                "-c:v", "libx264",
-                "-preset", "veryfast",
-                "-crf", "20",
+                "-c:v", "copy",          # 🚀 instant (no re-encode)
                 "-c:a", "aac",
                 "-movflags", "+faststart",
                 output_path

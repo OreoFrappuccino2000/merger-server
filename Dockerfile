@@ -1,13 +1,8 @@
 FROM python:3.11-slim
 
-# Install system dependencies (ffmpeg for broader codec support)
+# Install system dependencies (ffmpeg for audio/video processing)
 RUN apt-get update && apt-get install -y --no-install-recommends \
     ffmpeg \
-    libglib2.0-0 \
-    libsm6 \
-    libxext6 \
-    libxrender-dev \
-    libgl1-mesa-glx \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
@@ -17,6 +12,6 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 COPY . .
 
-EXPOSE 10000
+EXPOSE 5001
 
-CMD ["gunicorn", "--bind", "0.0.0.0:10000", "--timeout", "300", "--workers", "2", "app:app"]
+CMD ["gunicorn", "--bind", "0.0.0.0:5001", "--timeout", "300", "--workers", "2", "audio_video_merge_service:app"]

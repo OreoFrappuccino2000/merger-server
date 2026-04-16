@@ -1,0 +1,20 @@
+services:
+  - type: web
+    name: audio-video-merge-service
+    env: python
+    region: singapore
+    plan: free
+    buildCommand: "pip install -r requirements.txt"
+    startCommand: "python audio_video_merge_service.py"
+    envVars:
+      - key: HOST
+        value: "0.0.0.0"
+      - key: PORT
+        value: "5001"
+      - key: FFMPEG_BIN
+        value: "ffmpeg"
+      - key: FFPROBE_BIN
+        value: "ffprobe"
+      - key: NIXPACKS_APT_PKGS
+        value: "ffmpeg"
+    healthCheckPath: /health

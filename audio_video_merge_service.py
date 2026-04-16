@@ -200,6 +200,18 @@ def _merge_audio_video(video_path: str, audio_inputs: list, output_path: str) ->
 # ---------------------------------------------------------------------------
 # Routes
 # ---------------------------------------------------------------------------
+@app.route("/", methods=["GET"])
+def index():
+    return jsonify({
+        "service": "audio-video-merge",
+        "status": "running",
+        "endpoints": {
+            "health": "/health (GET)",
+            "merge_audio_video": "/merge_audio_video (POST)",
+            "download_merged": "/download_merged/<job_id>/<filename> (GET)"
+        }
+    })
+
 @app.route("/health", methods=["GET"])
 def health():
     return jsonify(status="ok", service="audio-video-merge")

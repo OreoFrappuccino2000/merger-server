@@ -120,7 +120,7 @@ def _create_audio_filter_complex(audio_inputs: list, video_duration: float) -> s
         if insert_time + audio_duration > video_duration:
             audio_duration = video_duration - insert_time
         
-        filters.append(f"[a{i}]adelay={int(insert_time * 1000)}|{int(insert_time * 1000)}[d{i}]")
+        filters.append(f"[{i+1}:a]adelay={int(insert_time * 1000)}|{int(insert_time * 1000)}[d{i}]")
         inputs.append(f"[d{i}]")
     
     # Mix all delayed audio streams
